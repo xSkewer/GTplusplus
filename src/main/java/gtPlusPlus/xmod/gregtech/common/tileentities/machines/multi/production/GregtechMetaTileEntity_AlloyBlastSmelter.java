@@ -27,6 +27,8 @@ import gtPlusPlus.xmod.gregtech.api.metatileentity.implementations.base.Gregtech
 import gtPlusPlus.xmod.gregtech.common.blocks.textures.TexturesGtBlock;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.StatCollector;
 import net.minecraftforge.fluids.FluidStack;
 
 import static com.gtnewhorizon.structurelib.structure.StructureUtility.*;
@@ -40,6 +42,8 @@ public class GregtechMetaTileEntity_AlloyBlastSmelter extends GregtechMeta_Multi
 	private static Item circuit;
 	private int mCasing;
 	private IStructureDefinition<GregtechMetaTileEntity_AlloyBlastSmelter> STRUCTURE_DEFINITION = null;
+
+	private boolean isBussesSeparate = false;
 
 
 	public GregtechMetaTileEntity_AlloyBlastSmelter(final int aID, final String aName, final String aNameRegional) {
@@ -217,89 +221,149 @@ public class GregtechMetaTileEntity_AlloyBlastSmelter extends GregtechMeta_Multi
 	public boolean checkRecipe(final ItemStack aStack) {
 
 		if (this.getBaseMetaTileEntity().isServerSide()) {
-			//Get Controller Circuit
-			this.isUsingControllerCircuit = isCorrectMachinePart(aStack);
+			if (isBussesSeparate) {
+				FluidStack[] tFluids = getStoredFluids().toArray(new FluidStack[0]);
+				for (GT_MetaTileEntity_Hatch_InputBus tBus : mInputBusses) {
+					ArrayList<ItemStack> tInputs = new ArrayList<>();
+					tBus.mRecipeMap = getRecipeMap();
+	
+					if (isValidMetaTileEntity(tBus)) {
+						for (int i = tBus.getBaseMetaTileEntity().getSizeInventory() - 1; i >= 0; i--) {
+							if (tBus.getBaseMetaTileEntity().getStackInSlot(i) != null) {
+								tInputs.add(tBus.getBaseMetaTileEntity().getStackInSlot(i));
+							}
+						}
+					}
+					ItemStack[] tItems = tInputs.toArray(new ItemStack[0]);
 
-			final ArrayList<ItemStack> tInputList = this.getStoredInputs();
-			for (int i = 0; i < (tInputList.size() - 1); i++) {
-				for (int j = i + 1; j < tInputList.size(); j++) {
-					if (GT_Utility.areStacksEqual(tInputList.get(i), tInputList.get(j))) {
-						if (tInputList.get(i).stackSize >= tInputList.get(j).stackSize) {
-							tInputList.remove(j--);
+					final long tVoltage = this.getMaxInputVoltage();
+					final byte tTier = (byte) Math.max(1, GT_Utility.getTier(tVoltage));
+					final GT_Recipe tRecipe = GTPP_Recipe.GTPP_Recipe_Map.sAlloyBlastSmelterRecipes.findRecipe(this.getBaseMetaTileEntity(), false, gregtech.api.enums.GT_Values.V[tTier], tFluids, tItems);
+
+					if (tRecipe != null) {
+						Logger.WARNING("Found some Valid Inputs.");
+						this.mEfficiency = (10000 - ((this.getIdealStatus() - this.getRepairStatus()) * 1000));
+						this.mEfficiencyIncrease = 10000;
+						if (tRecipe.mEUt <= 16) {
+							this.mEUt = (tRecipe.mEUt * (1 << (tTier - 1)) * (1 << (tTier - 1)));
+							this.mMaxProgresstime = (tRecipe.mDuration / (1 << (tTier - 1)));
 						} else {
-							tInputList.remove(i--);
-							break;
+							this.mEUt = tRecipe.mEUt;
+							this.mMaxProgresstime = tRecipe.mDuration;
+							while (this.mEUt <= gregtech.api.enums.GT_Values.V[(tTier - 1)]) {
+								this.mEUt *= 4;
+								this.mMaxProgresstime /= 2;
+							}
+						}
+						if (this.mEUt > 0) {
+							this.mEUt = (-this.mEUt);
+						}
+						this.mMaxProgresstime = Math.max(1, this.mMaxProgresstime);
+						this.mOutputFluids = new FluidStack[]{tRecipe.getFluidOutput(0)};
+						List<ItemStack> tOutPutItems = new ArrayList<ItemStack>();
+						for (ItemStack tOut : tRecipe.mOutputs) {
+							if (ItemUtils.checkForInvalidItems(tOut)) {
+								tOutPutItems.add(tOut);
+							}	
+						}
+						if (tOutPutItems.size() > 0)
+						this.mOutputItems = tOutPutItems.toArray(new ItemStack[tOutPutItems.size()]);
+						this.updateSlots();
+						return true;
+					}
+				}
+			} else {
+				//Get Controller Circuit
+				this.isUsingControllerCircuit = isCorrectMachinePart(aStack);
+
+				final ArrayList<ItemStack> tInputList = this.getStoredInputs();
+				for (int i = 0; i < (tInputList.size() - 1); i++) {
+					for (int j = i + 1; j < tInputList.size(); j++) {
+						if (GT_Utility.areStacksEqual(tInputList.get(i), tInputList.get(j))) {
+							if (tInputList.get(i).stackSize >= tInputList.get(j).stackSize) {
+								tInputList.remove(j--);
+							} else {
+								tInputList.remove(i--);
+								break;
+							}
 						}
 					}
 				}
-			}
 
-			//Validity check
-			if ((isUsingControllerCircuit && tInputList.size() < 1) || (!isUsingControllerCircuit && tInputList.size() < 2)) {
-				Logger.WARNING("Not enough inputs.");
-				return false;
-			}
-			else if (isUsingControllerCircuit  && tInputList.size() >= 1) {
-				tInputList.add(CI.getNumberedCircuit(this.mMode));
-			}
+				//Validity check
+				if ((isUsingControllerCircuit && tInputList.size() < 1) || (!isUsingControllerCircuit && tInputList.size() < 2)) {
+					Logger.WARNING("Not enough inputs.");
+					return false;
+				}
+				else if (isUsingControllerCircuit  && tInputList.size() >= 1) {
+					tInputList.add(CI.getNumberedCircuit(this.mMode));
+				}
 
 
-			final ItemStack[] tInputs = Arrays.copyOfRange(tInputList.toArray(new ItemStack[tInputList.size()]), 0, tInputList.size());
+				final ItemStack[] tInputs = Arrays.copyOfRange(tInputList.toArray(new ItemStack[tInputList.size()]), 0, tInputList.size());
 
-			final ArrayList<FluidStack> tFluidList = this.getStoredFluids();
-			for (int i = 0; i < (tFluidList.size() - 1); i++) {
-				for (int j = i + 1; j < tFluidList.size(); j++) {
-					if (GT_Utility.areFluidsEqual(tFluidList.get(i), tFluidList.get(j))) {
-						if (tFluidList.get(i).amount >= tFluidList.get(j).amount) {
-							tFluidList.remove(j--);
-						} else {
-							tFluidList.remove(i--);
-							break;
+				final ArrayList<FluidStack> tFluidList = this.getStoredFluids();
+				for (int i = 0; i < (tFluidList.size() - 1); i++) {
+					for (int j = i + 1; j < tFluidList.size(); j++) {
+						if (GT_Utility.areFluidsEqual(tFluidList.get(i), tFluidList.get(j))) {
+							if (tFluidList.get(i).amount >= tFluidList.get(j).amount) {
+								tFluidList.remove(j--);
+							} else {
+								tFluidList.remove(i--);
+								break;
+							}
 						}
 					}
 				}
-			}
-			final FluidStack[] tFluids = Arrays.copyOfRange(tFluidList.toArray(new FluidStack[tInputList.size()]), 0, 1);
-			if (tInputList.size() > 1) {
-				final long tVoltage = this.getMaxInputVoltage();
-				final byte tTier = (byte) Math.max(1, GT_Utility.getTier(tVoltage));
-				final GT_Recipe tRecipe = GTPP_Recipe.GTPP_Recipe_Map.sAlloyBlastSmelterRecipes.findRecipe(this.getBaseMetaTileEntity(), false, gregtech.api.enums.GT_Values.V[tTier], tFluids, tInputs);
-				if ((tRecipe != null) && (tRecipe.isRecipeInputEqual(true, tFluids, tInputs))) {
-					Logger.WARNING("Found some Valid Inputs.");
-					this.mEfficiency = (10000 - ((this.getIdealStatus() - this.getRepairStatus()) * 1000));
-					this.mEfficiencyIncrease = 10000;
-					if (tRecipe.mEUt <= 16) {
-						this.mEUt = (tRecipe.mEUt * (1 << (tTier - 1)) * (1 << (tTier - 1)));
-						this.mMaxProgresstime = (tRecipe.mDuration / (1 << (tTier - 1)));
-					} else {
-						this.mEUt = tRecipe.mEUt;
-						this.mMaxProgresstime = tRecipe.mDuration;
-						while (this.mEUt <= gregtech.api.enums.GT_Values.V[(tTier - 1)]) {
-							this.mEUt *= 4;
-							this.mMaxProgresstime /= 2;
+				final FluidStack[] tFluids = Arrays.copyOfRange(tFluidList.toArray(new FluidStack[tInputList.size()]), 0, 1);
+				if (tInputList.size() > 1) {
+					final long tVoltage = this.getMaxInputVoltage();
+					final byte tTier = (byte) Math.max(1, GT_Utility.getTier(tVoltage));
+					final GT_Recipe tRecipe = GTPP_Recipe.GTPP_Recipe_Map.sAlloyBlastSmelterRecipes.findRecipe(this.getBaseMetaTileEntity(), false, gregtech.api.enums.GT_Values.V[tTier], tFluids, tInputs);
+					if ((tRecipe != null) && (tRecipe.isRecipeInputEqual(true, tFluids, tInputs))) {
+						Logger.WARNING("Found some Valid Inputs.");
+						this.mEfficiency = (10000 - ((this.getIdealStatus() - this.getRepairStatus()) * 1000));
+						this.mEfficiencyIncrease = 10000;
+						if (tRecipe.mEUt <= 16) {
+							this.mEUt = (tRecipe.mEUt * (1 << (tTier - 1)) * (1 << (tTier - 1)));
+							this.mMaxProgresstime = (tRecipe.mDuration / (1 << (tTier - 1)));
+						} else {
+							this.mEUt = tRecipe.mEUt;
+							this.mMaxProgresstime = tRecipe.mDuration;
+							while (this.mEUt <= gregtech.api.enums.GT_Values.V[(tTier - 1)]) {
+								this.mEUt *= 4;
+								this.mMaxProgresstime /= 2;
+							}
 						}
+						if (this.mEUt > 0) {
+							this.mEUt = (-this.mEUt);
+						}
+						this.mMaxProgresstime = Math.max(1, this.mMaxProgresstime);
+						this.mOutputFluids = new FluidStack[]{tRecipe.getFluidOutput(0)};
+						List<ItemStack> tOutPutItems = new ArrayList<ItemStack>();
+						for (ItemStack tOut : tRecipe.mOutputs) {
+							if (ItemUtils.checkForInvalidItems(tOut)) {
+								tOutPutItems.add(tOut);
+							}	
+						}
+						if (tOutPutItems.size() > 0)
+						this.mOutputItems = tOutPutItems.toArray(new ItemStack[tOutPutItems.size()]);
+						this.updateSlots();
+						return true;
 					}
-					if (this.mEUt > 0) {
-						this.mEUt = (-this.mEUt);
-					}
-					this.mMaxProgresstime = Math.max(1, this.mMaxProgresstime);
-					this.mOutputFluids = new FluidStack[]{tRecipe.getFluidOutput(0)};
-					List<ItemStack> tOutPutItems = new ArrayList<ItemStack>();
-					for (ItemStack tOut : tRecipe.mOutputs) {
-						if (ItemUtils.checkForInvalidItems(tOut)) {
-							tOutPutItems.add(tOut);
-						}	
-					}
-					if (tOutPutItems.size() > 0)
-					this.mOutputItems = tOutPutItems.toArray(new ItemStack[tOutPutItems.size()]);
-					this.updateSlots();
-					return true;
 				}
 			}
 		}
 		Logger.WARNING("Failed to find some Valid Inputs or Clientside.");
 		return false;
 	}	
+
+    @Override
+    public boolean onWireCutterRightClick(byte aSide, byte aWrenchingSide, EntityPlayer aPlayer, float aX, float aY, float aZ) {
+		isBussesSeparate = !isBussesSeparate;
+		GT_Utility.sendChatToPlayer(aPlayer, StatCollector.translateToLocal("GT5U.machines.separatebus") + " " + isBussesSeparate);
+        return true;
+    }
 	
 	@Override
 	public int getMaxParallelRecipes() {
