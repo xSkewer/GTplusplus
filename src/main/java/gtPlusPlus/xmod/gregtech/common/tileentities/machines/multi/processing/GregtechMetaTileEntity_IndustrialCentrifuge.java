@@ -21,6 +21,7 @@ import net.minecraft.block.Block;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraftforge.fluids.FluidStack;
 
 import static com.gtnewhorizon.structurelib.structure.StructureUtility.*;
 import static com.gtnewhorizon.structurelib.structure.StructureUtility.ofBlock;
@@ -179,7 +180,14 @@ public class GregtechMetaTileEntity_IndustrialCentrifuge extends GregtechMeta_Mu
 
 	@Override
 	public boolean checkRecipe(final ItemStack aStack) {
-		return checkRecipeGeneric(6* GT_Utility.getTier(this.getMaxInputVoltage()), 90, 125);
+		return checkRecipeGeneric(6 * GT_Utility.getTier(this.getMaxInputVoltage()), 90, 125, 10000);
+	}
+
+	@Override
+	public boolean checkRecipeGeneric(int aMaxParallelRecipes, int aEUPercent, int aSpeedBonusPercent, int aOutputChanceRoll) {
+		ItemStack[] tItemInputs = getCompactedInputs();
+		FluidStack[] tFluidInputs = getCompactedFluids();
+		return checkRecipeGeneric(tItemInputs, tFluidInputs, aMaxParallelRecipes, aEUPercent, aSpeedBonusPercent, aOutputChanceRoll);
 	}
 	
 	@Override
